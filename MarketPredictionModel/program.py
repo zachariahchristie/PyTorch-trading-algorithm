@@ -12,8 +12,8 @@ import yfinance as yf
 from datetime import datetime
 
 #Set up stock, time period, data prep, etc
-ticker = 'AAPL'
-start_date = '2024-01-01'
+ticker = 'AMZN'
+start_date = '2020-01-01'
 end_date = datetime.now().strftime('%Y-%m-%d')
 data = yf.download(ticker, start=start_date, end=end_date)
 data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
@@ -46,22 +46,28 @@ train_loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
 #LTSM Model
 class PredictionModel(nn.Module):
-    def __init__(self, input_size=5, hidden_layer_size=50, output_size=1):
+    def __init__(self, input_size=5, hidden_layer_size=50, output_size=1, dropout_rate=0.3):
         super(PredictionModel, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
         self.fc = nn.Linear(hidden_layer_size, output_size)
+        #Added in a dropout layer to randomly set 0.2 (20%) of nodes to 0
+        self.dropout = nn.Dropout(dropout_rate)
     
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
+        #Below code performs dropout
+        lstm_out = self.dropout(lstm_out)
         predictions = self.fc(lstm_out[:, -1, :])
         return predictions
 
 model = PredictionModel()
 
 #Training Model
-defined_learning_rate = 0.001
+defined_learning_rate = 0.005
 criteria = nn.MSELoss()
-optimiser = torch.optim.Adam(model.parameters(), lr=defined_learning_rate)
+#Added in a weight_decay parameter to the optimiser which applies a L2 penalty to prevent overfitting.
+#This works by adding a penalty to the loss function proportional to the sum of the sqaures of the weights.
+optimiser = torch.optim.Adam(model.parameters(), lr=defined_learning_rate, weight_decay=1e-5)
 
 num_trials = 20
 losses = []
@@ -117,6 +123,13 @@ print(f'Root Mean Squared Error (RMSE): {rmse:.4f}')
 print(f'Mean Absoloute Error (MAE): {mae:.4f}')
 print(f'R-squared (R2): {r2:.4f}')
 
+# Residuals mean and variance calculations
+residuals = torch.tensor(actual_prices[:, 3] - predictions[:, 3])
+residuals_mean = torch.mean(residuals).item()
+residuals_variance = torch.var(residuals).item()
+print(f'Residual Mean: {residuals_mean:.4f}')
+print(f'Residuals Variance: {residuals_variance:.4f}')
+
 #Predicted vs Actual prices
 plt.figure(figsize=(10, 6))
 plt.plot(actual_prices[:, 3], label='Actual Prices')
@@ -128,7 +141,6 @@ plt.title(f'{ticker} Stock Price Prediction')
 plt.show()
 
 # Residuals plot
-residuals = actual_prices[:, 3] - predictions[:, 3]
 plt.figure(figsize=(10, 6))
 plt.plot(residuals)
 plt.title('Residuals (Actual - Predicted Prices)')
